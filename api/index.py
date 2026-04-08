@@ -23,7 +23,7 @@ async def handle_logic(url, chat_id):
     
     try:
         # 2. Gọi Gemini API với cấu hình an toàn BLOCK_NONE
-        gemini_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+        gemini_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_KEY}"
         
         payload = {
             "contents": [{
