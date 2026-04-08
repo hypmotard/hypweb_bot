@@ -1,42 +1,56 @@
-import os
+# Thêm thư viện này ở đầu file nếu chưa có
 import requests
-import asyncio # Thêm cái này
-from flask import Flask, request
-from telegram import Update, Bot
 
-app = Flask(__name__)
+# ... (Giữ nguyên phần cấu hình API Keys ở trên)
 
-# Cấu hình lấy từ Environment Variables
-TOKEN = os.environ.get('TELEGRAM_TOKEN')
-WP_URL = 'https://hypmoto.com/wp-json/wp/v2/posts'
-WP_USER = os.environ.get('WP_USER')
-WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD')
-GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
-
-bot = Bot(token=TOKEN)
-
-# Thay đoạn xử lý trong hàm webhook bằng đoạn này để test nhanh
-@app.route('/webhook', methods=['POST'])
-def webhook():
+async def process_article(url, chat_id):
     try:
-        data = request.get_json(force=True)
-        chat_id = data['message']['chat']['id']
-        text = data['message'].get('text', '')
-
-        # Dùng requests để gửi tin nhắn (Cách này cực bền trên Vercel/Flask)
-        if "http" in text:
-            msg = "HYPmoto đã nhận link! Đang xử lý..."
-        else:
-            msg = "Chào ông chủ HYPmoto! Gửi link tui dịch cho."
-
-        send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        requests.post(send_url, json={"chat_id": chat_id, "text": msg})
+        # 1. Gọi Gemini để đọc link và viết bài
+        # Mẹo: Ở đây tui viết prompt để Gemini tự bóc tách và dịch luôn
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+        prompt = {
+            "contents": [{
+                "parts": [{
+                    "text": f"Đọc nội dung từ link này: {url}. Hãy viết thành một bài báo tiếng Việt hoàn chỉnh cho website HYPmoto. Style chuyên nghiệp, tập trung vào kỹ thuật xe ADV/Rally. Trả về định dạng HTML (chỉ dùng h2, h3, p, b). Tiêu đề đặt trong thẻ <h1>."
+                }]
+            }]
+        }
         
-        return "ok", 200
-    except Exception as e:
-        print(f"Lỗi rồi ông ơi: {e}")
-        return "error", 500
+        response = requests.post(gemini_url, json=prompt)
+        result = response.json()
+        full_text = result['candidates'][0]['content']['parts'][0]['text']
+        
+        # Tách tiêu đề (H1) và nội dung
+        title = full_text.split('</h1>')[0].replace('<h1>', '').strip()
+        content = full_text.split('</h1>')[1].strip()
 
-@app.route('/')
-def index():
-    return "HYPmoto Bot is running on Vercel!"
+        # 2. Đẩy lên WordPress dưới dạng Nháp (Draft)
+        wp_auth = (WP_USER, WP_APP_PASSWORD)
+        wp_data = {
+            'title': title,
+            'content': content,
+            'status': 'draft'
+        }
+        wp_res = requests.post(WP_URL, json=wp_data, auth=wp_auth)
+
+        if wp_res.status_code == 201:
+            post_link = wp_res.json().get('link')
+            return f"✅ Xong rồi ông chủ! Bài viết đã nằm trong Draft.\nXem tại đây: {post_link}"
+        else:
+            return f"❌ Lỗi đăng bài WP: {wp_res.status_code}"
+
+    except Exception as e:
+        return f"❌ Có biến rồi ông ơi: {str(e)}"
+
+# Trong hàm webhook(), sửa lại chỗ gọi xử lý:
+if "http" in text:
+    # Gửi thông báo đang xử lý trước cho đỡ sốt ruột
+    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
+                  json={"chat_id": chat_id, "text": "Đang bào dữ liệu và dịch... Đợi tui xíu!"})
+    
+    # Chạy hàm xử lý chính
+    report = await process_article(text, chat_id)
+    
+    # Gửi kết quả cuối cùng
+    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
+                  json={"chat_id": chat_id, "text": report})
