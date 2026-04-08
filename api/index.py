@@ -15,25 +15,27 @@ GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
 
 bot = Bot(token=TOKEN)
 
+# Thay đoạn xử lý trong hàm webhook bằng đoạn này để test nhanh
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    if request.method == "POST":
-        update = Update.de_json(request.get_json(force=True), bot)
-        
-        # Chạy logic xử lý trong một event loop riêng vì Flask là đồng bộ
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        if update.message and update.message.text:
-            text = update.message.text
-            if "http" in text:
-                # Chỗ này sau này ông viết thêm logic gọi Gemini/Đăng bài nhé
-                loop.run_until_complete(bot.send_message(
-                    chat_id=update.message.chat_id, 
-                    text="HYPmoto đã nhận link! Đang xử lý..."
-                ))
+    try:
+        data = request.get_json(force=True)
+        chat_id = data['message']['chat']['id']
+        text = data['message'].get('text', '')
+
+        # Dùng requests để gửi tin nhắn (Cách này cực bền trên Vercel/Flask)
+        if "http" in text:
+            msg = "HYPmoto đã nhận link! Đang xử lý..."
+        else:
+            msg = "Chào ông chủ HYPmoto! Gửi link tui dịch cho."
+
+        send_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        requests.post(send_url, json={"chat_id": chat_id, "text": msg})
         
         return "ok", 200
+    except Exception as e:
+        print(f"Lỗi rồi ông ơi: {e}")
+        return "error", 500
 
 @app.route('/')
 def index():
